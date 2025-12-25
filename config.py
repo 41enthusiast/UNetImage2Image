@@ -3,10 +3,10 @@ from typing import Optional
 
 @dataclass
 class DataConfig:
-    dataset_name: str = "art_dataset_v2"
-    dataset_path: str = "../art_painting_data"
-    img_size: int = 224
-    batch_size: int = 8
+    dataset_name: str = "art_dataset_v1"
+    dataset_path: str = "../data/art_painting"
+    img_size: int = 256
+    batch_size: int = 128
     num_workers: int = 8
     augment: bool = True
 
@@ -16,6 +16,7 @@ class ModelConfig_Base:
     model_name: str = 'unet_base_15M'
     hidden_dim: int = 64
     num_blocks: int = 8
+    in_channels: int = 3
 
 @dataclass
 class ModelConfig_ENB0:
@@ -58,7 +59,7 @@ class ModelConfig_Swin:
 @dataclass
 class TrainConfig:
     lr: float = 1e-3
-    max_epochs: int = 10
+    max_epochs: int = 5000
     precision: int = 16          # AMP
     num_devices: int = 1
     accumulate_grad_batches: int = 1

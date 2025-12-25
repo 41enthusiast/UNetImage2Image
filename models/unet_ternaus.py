@@ -2,7 +2,7 @@ from torchvision import models
 import torchvision
 import torch
 import torch.nn as nn
-from model_utils import *
+from .model_utils import *
 from torchsummary import summary
 
 class Interpolate(nn.Module):

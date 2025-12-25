@@ -4,7 +4,7 @@ from torchsummary import summary
 import torch
 import torch.nn.functional as F
 
-from model_utils import *
+from .model_utils import *
 from torchvision import models
 
 

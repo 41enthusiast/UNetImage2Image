@@ -3,3 +3,7 @@ torchvision
 matplotlib
 albumentations
 pytorch_lightning
+torchmetrics
+wandb
+einops
+timm

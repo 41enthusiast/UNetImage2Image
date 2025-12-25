@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchsummary import summary
-from model_utils import *
+from .model_utils import *
 
 class DecoderBlock_UNetpcb(nn.Module):
     def __init__(self, in_channels, out_channels, upsample=1):        
