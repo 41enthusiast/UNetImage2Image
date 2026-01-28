@@ -2,14 +2,16 @@
 
 import pytorch_lightning as pl
 from torch import  nn 
-from models.unet_base import UNet
-# from models.unet_efb0 import UNet_pcb
+# from models.unet_base import UNet
+from models.unet_efb0 import UNet_pcb
 # from models.unet_ternaus import UNet_ternaus
 # from models.unet_swin import SwinUnet
 from utils import *
+from models.model_utils import InitWeights_XavierUniform
 # import wandb
 from config import *
 from pytorch_lightning.loggers import WandbLogger
+import wandb
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from dataset import BasicDataset
 from torch.utils.data import DataLoader
@@ -17,26 +19,41 @@ from torch.utils.data import Subset
 from torchmetrics.image.psnr import PeakSignalNoiseRatio
 from torchmetrics.image.ssim import StructuralSimilarityIndexMeasure
 # from lightning.pytorch import Trainer, seed_everything
+import os
 
 class Img_2_Img(pl.LightningModule):
     def __init__(self, model):
         super(Img_2_Img, self).__init__()
         self.model = model
         self.MSE = nn.MSELoss()
+        self.L1 = nn.L1Loss()
+        # self.perceptual_loss = PerceptualLoss_reluvariant()#PercetualLoss_convvariant()
+        # self.style_loss = StyleLoss()
         self.psnr = PeakSignalNoiseRatio(data_range=1.0)
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
         self.log_image_every_n_epochs = 10
         self.example_val_batch = None
+        self.lr = train_cfg.lr
+        
 
     def forward(self, x):
-        return self.model(x)
+        return torch.sigmoid(self.model(x))
     
     def training_step(self, batch, batch_idx):
         images, labels = batch['image'], batch['mask']
         # print(images.dtype, labels.dtype)
         preds = self(images)
+        if batch_idx == 0:
+            print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
         
-        loss = self.MSE(preds, labels)
+        preds = preds.repeat(1, 3, 1, 1)
+        labels = labels.repeat(1, 3, 1, 1)
+        # print(preds.shape, labels.shape)
+        
+        # loss = self.MSE(preds, labels)
+        loss = model_cfg.alpha_l *self.L1(preds, labels) #+ \
+                # model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
+                # model_cfg.gamma_l * self.style_loss(preds, labels)
         psnr = self.psnr(preds, labels)
         ssim = self.ssim(preds, labels)
         self.log('train_loss', loss, prog_bar=True)
@@ -48,33 +65,46 @@ class Img_2_Img(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         images, labels = batch['image'], batch['mask']
         preds = self(images)
+        if batch_idx == 0:
+            print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
+        
+        preds = preds.repeat(1, 3, 1, 1)
+        labels = labels.repeat(1, 3, 1, 1) 
+        # print(preds.shape, labels.shape)
 
-        loss = self.MSE(preds, labels)
+        # loss = self.MSE(preds, labels)
+        loss = model_cfg.alpha_l * self.L1(preds, labels)#+ \
+            #    model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
+            #    model_cfg.gamma_l * self.style_loss(preds, labels)
         psnr = self.psnr(preds, labels)
         ssim = self.ssim(preds, labels)
         self.log('val_loss', loss, prog_bar=True)
         self.log("val_psnr", psnr, prog_bar=False)
         self.log("val_ssim", ssim, prog_bar=True)
 
-    def test_step(self, test_batch, batch_idx):
-        images, labels = test_batch['image'], test_batch['mask']
-        preds = self.forward(images)
-        loss = self.MSE(preds, labels)
+    # def test_step(self, test_batch, batch_idx):
+    #     images, labels = test_batch['image'], test_batch['mask']
+    #     preds = torch.sigmoid(self.forward(images))
+    #     # loss = self.MSE(preds, labels)
+    #     loss = train_cfg.alpha_l * self.L1(preds, labels) + \
+    #            train_cfg.beta_l * self.perceptual_loss(preds, labels) + \
+    #            train_cfg.gamma_l * self.style_loss(preds, labels)
         
-        self.log('test_loss', loss, prog_bar=True)
+    #     self.log('test_loss', loss, prog_bar=True)
 
-    def predict_step(self, test_batch, batch_idx):
-        images, labels = test_batch['image'], test_batch['mask']
-        return self.forward(images)
+    # def predict_step(self, test_batch, batch_idx):
+    #     images= test_batch['image']
+    #     return torch.sigmoid(self.forward(images))
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=train_cfg.lr)
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.RMSprop(self.parameters(), lr=self.lr)
         
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode='min',              # because we monitor val_loss
             factor=0.5,              # lr = lr * factor
-            patience=5,              # epochs with no improvement
+            patience=train_cfg.patience,              # epochs with no improvement
             min_lr=1e-6,
         )
         
@@ -88,7 +118,9 @@ class Img_2_Img(pl.LightningModule):
             }
         }
     
-    def on_validation_epoch_end(self):
+    def on_validation_end(self):
+        # print('Logging validation images...')
+        # self.log('lr', self.optimizers().param_groups[0]['lr'], prog_bar=True, )
         epoch = self.current_epoch
 
         if (
@@ -114,7 +146,6 @@ class Img_2_Img(pl.LightningModule):
 
         # Optional: W&B logging
         if isinstance(self.logger, pl.loggers.WandbLogger):
-            import wandb
             self.logger.experiment.log({
                 "val_examples": wandb.Image(
                     f"logs/val_pred_epoch_{epoch}.png",
@@ -128,33 +159,42 @@ class Img_2_Img(pl.LightningModule):
 if __name__ == '__main__':
     # print('Training UNET model...')
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    print('Using device:', device)
+    print(os.cpu_count(), 'CPU cores detected.')
+    
     data_cfg = DataConfig()
-    model_cfg = ModelConfig_Base()
-    # model_cfg = ModelConfig_ENB0()
+    # model_cfg = ModelConfig_Base()
+    model_cfg = ModelConfig_ENB0()
     # model_cfg = ModelConfig_Ternaus()
     # model_cfg = ModelConfig_Swin()
 
     train_cfg = TrainConfig()
 
-    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train/masked',
-                        f'{data_cfg.dataset_path}/train/mask',
+    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image_v3',
+                        f'{data_cfg.dataset_path}/train/mask_v3',
                         img_size=data_cfg.img_size,)
-    val_ds = BasicDataset(f'{data_cfg.dataset_path}/train/masked',
-                        f'{data_cfg.dataset_path}/train/mask',
+    val_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image_v3',
+                        f'{data_cfg.dataset_path}/train/mask_v3',
                         img_size=data_cfg.img_size,
                         split='val')
-    train_dset = Subset(train_ds, range(0, int(len(train_ds)*train_cfg.tr_split)))
-    train_dl = DataLoader(train_dset, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers)
-    val_ds = Subset(val_ds, range(int(len(train_ds)*train_cfg.tr_split), len(train_ds)))
-    val_dl = DataLoader(val_ds, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers)
+    val_ds = train_ds
+    # train_dset = Subset(train_ds, range(0, int(len(train_ds)*train_cfg.tr_split)))
+    train_dset = train_ds
+    train_dl = DataLoader(train_dset, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers,
+                            pin_memory=True, persistent_workers=True, prefetch_factor=2)
+    # val_ds = Subset(val_ds, range(int(len(train_ds)*train_cfg.tr_split), len(train_ds)))
+    val_dl = DataLoader(val_ds, batch_size=data_cfg.batch_size, shuffle=False, num_workers=data_cfg.num_workers, 
+                        pin_memory=True, persistent_workers=True, prefetch_factor=2)
 
     print(f'Train dataset size: {len(train_dset)}', 'Val dataset size:', len(val_ds))
     
     wandb_logger = WandbLogger(
         project = 'unet_i2i',
-        name = model_cfg.model_name,
+        name = model_cfg.model_name+"_1i1m",
         save_dir = 'logs',
         log_model = True,
+        notes = f"Training with L1 loss, randomized masks, some training optimizations",
         # accelerator = device,
         # devices =train_cfg.num_devices,
         # precision = train_cfg.precision
@@ -179,21 +219,22 @@ if __name__ == '__main__':
     # model = UNet_ternaus(pretrained=model_cfg.pretrained, num_filters=model_cfg.num_filters, is_deconv=model_cfg.is_deconv)
     
     #EFB0
-    # model = UNet_pcb(pretrained=model_cfg.pretrained,
-    #                  layer1_features=model_cfg.layer1_features,
-    #                  layer2_features=model_cfg.layer2_features,
-    #                  layer3_features=model_cfg.layer3_features,
-    #                  layer4_features=model_cfg.layer4_features,
-    #                  layer5_features=model_cfg.layer5_features) 
+    model = UNet_pcb(pretrained=model_cfg.pretrained,
+                     layer1_features=model_cfg.layer1_features,
+                     layer2_features=model_cfg.layer2_features,
+                     layer3_features=model_cfg.layer3_features,
+                     layer4_features=model_cfg.layer4_features,
+                     layer5_features=model_cfg.layer5_features) 
 
     #BASE UNET
-    model = UNet(in_channels=model_cfg.in_channels, out_channels=1)
+    # model = UNet(in_channels=model_cfg.in_channels, out_channels=1)
     
+    model.apply(InitWeights_XavierUniform(gain=1))
     model = Img_2_Img(model).to(device)
     
     early_stop = EarlyStopping(
         monitor = train_cfg.monitor,
-        patience = train_cfg.patience,
+        patience = train_cfg.patience*2,
         mode = 'min',
         verbose = True
     )
@@ -202,7 +243,7 @@ if __name__ == '__main__':
         monitor = train_cfg.monitor,
         save_top_k = 1,
         mode = 'min',
-        filename="ckpts/{model_config.model_name}/epoch{epoch}-val{val_loss:.4f}"
+        filename=f"{model_cfg.model_name}"
     )
 
     # wandb_logger.experiment_config['num_params'] = sum(p.numel() for p  in model.parameters())

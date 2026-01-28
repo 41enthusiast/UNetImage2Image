@@ -3,10 +3,10 @@ from typing import Optional
 
 @dataclass
 class DataConfig:
-    dataset_name: str = "art_dataset_v1"
-    dataset_path: str = "../data/art_painting"
+    dataset_name: str = "art_dataset_v2"
+    dataset_path: str = "../art_painting_data"
     img_size: int = 256
-    batch_size: int = 128
+    batch_size: int = 8#32
     num_workers: int = 8
     augment: bool = True
 
@@ -17,6 +17,9 @@ class ModelConfig_Base:
     hidden_dim: int = 64
     num_blocks: int = 8
     in_channels: int = 3
+    alpha_l: float = 1.0 # weight for L1 loss
+    beta_l: float = 0.0#1.0 # weight for perceptual loss
+    gamma_l: float = 0.0#150.0 # weight for style loss
 
 @dataclass
 class ModelConfig_ENB0:
@@ -28,6 +31,9 @@ class ModelConfig_ENB0:
     layer3_features: int = 24
     layer4_features: int = 40
     layer5_features: int = 80
+    alpha_l: float = 1.0 # weight for L1 loss
+    beta_l: float = 0.0#1.0 # weight for perceptual loss
+    gamma_l: float = 0.0#150.0 # weight for style loss
 
 @dataclass
 class ModelConfig_Ternaus:
@@ -58,12 +64,12 @@ class ModelConfig_Swin:
 
 @dataclass
 class TrainConfig:
-    lr: float = 1e-3
+    lr: float = 1e-4
     max_epochs: int = 5000
-    precision: int = 16          # AMP
+    precision: str = 'bf16'        
     num_devices: int = 1
     accumulate_grad_batches: int = 1
-    patience: int = 10           # early stopping
+    patience: int = 5          # early stopping
     monitor: str = "val_loss"
     tr_split: float = 0.8
 

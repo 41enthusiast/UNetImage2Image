@@ -1,6 +1,6 @@
 logs/
-__pycache__/
-pretrained_wts/
 ckpts/
-logs/
-uneti2i/
+.vscode/
+__pycache__/
+models/__pycache__/
+pretrained_wts/

@@ -7,3 +7,6 @@ torchmetrics
 wandb
 einops
 timm
+gradio
+matplotlib
+ptwt
