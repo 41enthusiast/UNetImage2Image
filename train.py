@@ -25,10 +25,11 @@ class Img_2_Img(pl.LightningModule):
     def __init__(self, model):
         super(Img_2_Img, self).__init__()
         self.model = model
-        self.MSE = nn.MSELoss()
+        self.model.apply(InitWeights_XavierUniform(gain=1))
+        # self.MSE = nn.MSELoss()
         self.L1 = nn.L1Loss()
-        # self.perceptual_loss = PerceptualLoss_reluvariant()#PercetualLoss_convvariant()
-        # self.style_loss = StyleLoss()
+        self.perceptual_loss = PerceptualLoss_reluvariant()#PercetualLoss_convvariant()
+        self.style_loss = StyleLoss()
         self.psnr = PeakSignalNoiseRatio(data_range=1.0)
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
         self.log_image_every_n_epochs = 10
@@ -43,17 +44,17 @@ class Img_2_Img(pl.LightningModule):
         images, labels = batch['image'], batch['mask']
         # print(images.dtype, labels.dtype)
         preds = self(images)
-        if batch_idx == 0:
-            print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
+        # if batch_idx == 0:
+        #     print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
         
         preds = preds.repeat(1, 3, 1, 1)
         labels = labels.repeat(1, 3, 1, 1)
         # print(preds.shape, labels.shape)
         
         # loss = self.MSE(preds, labels)
-        loss = model_cfg.alpha_l *self.L1(preds, labels) #+ \
-                # model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
-                # model_cfg.gamma_l * self.style_loss(preds, labels)
+        loss = model_cfg.alpha_l *self.L1(preds, labels) + \
+                model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
+                model_cfg.gamma_l * self.style_loss(preds, labels)
         psnr = self.psnr(preds, labels)
         ssim = self.ssim(preds, labels)
         self.log('train_loss', loss, prog_bar=True)
@@ -65,17 +66,17 @@ class Img_2_Img(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         images, labels = batch['image'], batch['mask']
         preds = self(images)
-        if batch_idx == 0:
-            print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
+        # if batch_idx == 0:
+        #     print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
         
         preds = preds.repeat(1, 3, 1, 1)
         labels = labels.repeat(1, 3, 1, 1) 
         # print(preds.shape, labels.shape)
 
         # loss = self.MSE(preds, labels)
-        loss = model_cfg.alpha_l * self.L1(preds, labels)#+ \
-            #    model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
-            #    model_cfg.gamma_l * self.style_loss(preds, labels)
+        loss = model_cfg.alpha_l * self.L1(preds, labels)+ \
+               model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
+               model_cfg.gamma_l * self.style_loss(preds, labels)
         psnr = self.psnr(preds, labels)
         ssim = self.ssim(preds, labels)
         self.log('val_loss', loss, prog_bar=True)
@@ -141,14 +142,14 @@ class Img_2_Img(pl.LightningModule):
             images,
             preds,  # or labels, depending what you want to show
             nrow=4,
-            img_name=f"val_pred_epoch_{epoch}"
+            img_name=f"outputs/images/val_pred_epoch_{epoch}"
         )
 
         # Optional: W&B logging
         if isinstance(self.logger, pl.loggers.WandbLogger):
             self.logger.experiment.log({
                 "val_examples": wandb.Image(
-                    f"logs/val_pred_epoch_{epoch}.png",
+                    f"misc/val_pred_epoch_{epoch}.png",
                     caption=f"Epoch {epoch}"
                 )
             })
@@ -171,19 +172,19 @@ if __name__ == '__main__':
 
     train_cfg = TrainConfig()
 
-    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image_v3',
-                        f'{data_cfg.dataset_path}/train/mask_v3',
+    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image',
+                        f'{data_cfg.dataset_path}/train/mask_v2',
                         img_size=data_cfg.img_size,)
-    val_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image_v3',
-                        f'{data_cfg.dataset_path}/train/mask_v3',
+    val_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image',
+                        f'{data_cfg.dataset_path}/train/mask_v2',
                         img_size=data_cfg.img_size,
                         split='val')
-    val_ds = train_ds
+    # val_ds = train_ds
     # train_dset = Subset(train_ds, range(0, int(len(train_ds)*train_cfg.tr_split)))
     train_dset = train_ds
     train_dl = DataLoader(train_dset, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers,
                             pin_memory=True, persistent_workers=True, prefetch_factor=2)
-    # val_ds = Subset(val_ds, range(int(len(train_ds)*train_cfg.tr_split), len(train_ds)))
+    val_ds = Subset(val_ds, range(int(len(train_ds)*train_cfg.tr_split), len(train_ds)))
     val_dl = DataLoader(val_ds, batch_size=data_cfg.batch_size, shuffle=False, num_workers=data_cfg.num_workers, 
                         pin_memory=True, persistent_workers=True, prefetch_factor=2)
 
@@ -191,7 +192,7 @@ if __name__ == '__main__':
     
     wandb_logger = WandbLogger(
         project = 'unet_i2i',
-        name = model_cfg.model_name+"_1i1m",
+        name = model_cfg.model_name+"_i1cm_loss_augmented_v2",
         save_dir = 'logs',
         log_model = True,
         notes = f"Training with L1 loss, randomized masks, some training optimizations",
@@ -229,7 +230,6 @@ if __name__ == '__main__':
     #BASE UNET
     # model = UNet(in_channels=model_cfg.in_channels, out_channels=1)
     
-    model.apply(InitWeights_XavierUniform(gain=1))
     model = Img_2_Img(model).to(device)
     
     early_stop = EarlyStopping(

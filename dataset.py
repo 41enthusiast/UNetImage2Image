@@ -195,13 +195,13 @@ class BasicDataset(Dataset):
         assert img.size//3 == mask.size, \
             f'Image and mask {name} should be the same size, but are {img.size//3} and {mask.size}'
 
-        # if self.split == 'train':
-        #     augmented = self.transform(image = img, mask=mask)
-        # else:
-            # augmented = {'image': torch.as_tensor(img).permute(2,0,1),
-            #              'mask': torch.as_tensor(mask)
-            #             }
-        augmented = self.val_transform(image = img, mask=mask)
+        if self.split == 'train':
+            augmented = self.transform(image = img, mask=mask)
+        else:
+            augmented = {'image': torch.as_tensor(img).permute(2,0,1),
+                         'mask': torch.as_tensor(mask)
+                        }
+            augmented = self.val_transform(image = img, mask=mask)
         return {
             'image': augmented['image'].float().contiguous(),
             'mask':augmented['mask'].permute(2,0,1).float().contiguous()

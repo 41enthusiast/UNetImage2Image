@@ -6,7 +6,7 @@ class DataConfig:
     dataset_name: str = "art_dataset_v2"
     dataset_path: str = "../art_painting_data"
     img_size: int = 256
-    batch_size: int = 8#32
+    batch_size: int = 32
     num_workers: int = 8
     augment: bool = True
 
@@ -18,8 +18,8 @@ class ModelConfig_Base:
     num_blocks: int = 8
     in_channels: int = 3
     alpha_l: float = 1.0 # weight for L1 loss
-    beta_l: float = 0.0#1.0 # weight for perceptual loss
-    gamma_l: float = 0.0#150.0 # weight for style loss
+    beta_l: float = 1.0 # weight for perceptual loss
+    gamma_l: float = 150.0 # weight for style loss
 
 @dataclass
 class ModelConfig_ENB0:
@@ -64,7 +64,7 @@ class ModelConfig_Swin:
 
 @dataclass
 class TrainConfig:
-    lr: float = 1e-4
+    lr: float = 1e-3
     max_epochs: int = 5000
     precision: str = 'bf16'        
     num_devices: int = 1

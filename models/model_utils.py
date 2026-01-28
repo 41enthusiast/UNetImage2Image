@@ -14,6 +14,7 @@ from tqdm import tqdm
 import torch
 import torchvision.utils as vutils
 import matplotlib.pyplot as plt
+import torch.nn as nn
 
 def check_gpu():
     if torch.cuda.is_available():
@@ -24,6 +25,28 @@ def check_gpu():
         print("PyTorch Version:", torch.__version__)  # Get the installed PyTorch version
     else:
         print("GPU is not available. Using CPU.")
+
+
+class InitWeights_He(object):
+    def __init__(self, neg_slope=1e-2):
+        self.neg_slope = neg_slope
+
+    def __call__(self, module):
+        if isinstance(module, nn.Conv3d) or isinstance(module, nn.Conv2d) or isinstance(module, nn.ConvTranspose2d) or isinstance(module, nn.ConvTranspose3d):
+            module.weight = nn.init.kaiming_normal_(module.weight, a=self.neg_slope)
+            if module.bias is not None:
+                module.bias = nn.init.constant_(module.bias, 0)
+
+
+class InitWeights_XavierUniform(object):
+    def __init__(self, gain=1):
+        self.gain = gain
+
+    def __call__(self, module):
+        if isinstance(module, nn.Conv3d) or isinstance(module, nn.Conv2d) or isinstance(module, nn.ConvTranspose2d) or isinstance(module, nn.ConvTranspose3d):
+            module.weight = nn.init.xavier_uniform_(module.weight, self.gain)
+            if module.bias is not None:
+                module.bias = nn.init.constant_(module.bias, 0)
 
 # def set_seed(seed):
 #     torch.manual_seed(seed)
