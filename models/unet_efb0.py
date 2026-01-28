@@ -9,7 +9,8 @@ class DecoderBlock_UNetpcb(nn.Module):
     def __init__(self, in_channels, out_channels, upsample=1):        
         super().__init__()
         if upsample:
-            self.upconv = nn.ConvTranspose2d(in_channels*2, in_channels*2, kernel_size=2, stride=2)
+            # self.upconv = nn.ConvTranspose2d(in_channels*2, in_channels*2, kernel_size=2, stride=2)
+            self.upconv = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         else:
             self.upconv = nn.Identity()
         self.layers = DoubleConv(in_channels * 2, out_channels, out_channels)

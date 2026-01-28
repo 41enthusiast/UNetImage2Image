@@ -6,7 +6,7 @@ class DataConfig:
     dataset_name: str = "art_dataset_v2"
     dataset_path: str = "../art_painting_data"
     img_size: int = 256
-    batch_size: int = 32
+    batch_size: int = 8
     num_workers: int = 8
     augment: bool = True
 

@@ -68,7 +68,7 @@ class BasicDataset(Dataset):
 
         def val_tfm(img_size):
             return A.Compose([
-                A.Resize(height=img_size[0], width=img_size[1]),
+                # A.Resize(height=img_size[0], width=img_size[1]),
                 # A.Normalize(mean=(0.,), std=(1.0,)),
                 ToTensorV2()
             ])
