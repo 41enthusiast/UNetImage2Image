@@ -10,3 +10,5 @@ timm
 gradio
 matplotlib
 ptwt
+seaborn
+scikit-learn

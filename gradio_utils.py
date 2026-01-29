@@ -31,7 +31,8 @@ class Img2ImgModel(pl.LightningModule):
 def load_model():
     model = Img2ImgModel.load_from_checkpoint(
         CKPT_PATH,
-        map_location=DEVICE
+        map_location=DEVICE,
+        strict=False
     )
     model.eval()
     model.to(DEVICE)
@@ -44,7 +45,7 @@ MASK_DIR = DATASET_ROOT / "mask"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-CKPT_PATH = "ckpts/efficientnetb0/epochepoch=27-valval_loss=0.0210.ckpt"
+CKPT_PATH = "logs/unet_i2i/puvmf076/checkpoints/unet_efb0_730k.ckpt"
 
 MODEL = load_model()
 

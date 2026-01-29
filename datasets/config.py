@@ -4,8 +4,8 @@ from typing import Optional
 @dataclass
 class DataConfig:
     dataset_name: str = "art_dataset_v2"
-    dataset_path: str = "../art_painting_data"
-    mask_path: str = "../dtd/images"
+    dataset_path: str = "../../art_painting_data"
+    mask_path: str = "../../dtd/images"
     n_subsets: int = 3
     class_names: Optional[list] = field(default_factory=lambda: [
         'banded', 'blotchy', 'braided', 'bubbly', 'bumpy'])

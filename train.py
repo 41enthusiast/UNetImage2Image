@@ -13,30 +13,33 @@ from config import *
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from dataset import BasicDataset
+from datasets.dataset import BasicDataset
 from torch.utils.data import DataLoader
 from torch.utils.data import Subset
 from torchmetrics.image.psnr import PeakSignalNoiseRatio
 from torchmetrics.image.ssim import StructuralSimilarityIndexMeasure
 # from lightning.pytorch import Trainer, seed_everything
+import random
 import os
 
 
 class Img_2_Img(pl.LightningModule):
-    def __init__(self, model):
+    def __init__(self, model, train_dataset, val_dataset):
         super(Img_2_Img, self).__init__()
         self.model = model
         # self.model.apply(InitWeights_XavierUniform(gain=1))
         self.init_model_weights()
         # self.MSE = nn.MSELoss()
         self.L1 = nn.L1Loss()
-        # self.perceptual_loss = PerceptualLoss_reluvariant()#PercetualLoss_convvariant()
-        # self.style_loss = StyleLoss()
+        self.perceptual_loss = PerceptualLoss_reluvariant()#PercetualLoss_convvariant()
+        self.style_loss = StyleLoss()
         self.psnr = PeakSignalNoiseRatio(data_range=1.0)
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
         self.log_image_every_n_epochs = 10
         self.example_val_batch = None
         self.lr = train_cfg.lr
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
         
 
     def forward(self, x):
@@ -63,6 +66,21 @@ class Img_2_Img(pl.LightningModule):
         if hasattr(self.model.final_conv.layers[0], 'bias') and self.model.final_conv.layers[0].bias is not None:
             torch.nn.init.constant_(self.model.final_conv.layers[0].bias, -1.0)
 
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers,
+                            pin_memory=False, persistent_workers=True, prefetch_factor=1)
+    
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=data_cfg.batch_size, shuffle=False, num_workers=data_cfg.num_workers,
+                            pin_memory=False, persistent_workers=True, prefetch_factor=1)
+
+    def on_train_epoch_start(self):
+        print('Shuffling textures for training...')
+        torch.cuda.empty_cache()
+        random.shuffle(self.train_dataset.shuffled_ids)
+        #validation step
+        self.log("first_texture_slot", self.train_dataset.shuffled_ids[0])
+    
     def training_step(self, batch, batch_idx):
         images, labels = batch['image'], batch['mask']
         # print(images.dtype, labels.dtype)
@@ -71,13 +89,13 @@ class Img_2_Img(pl.LightningModule):
         #     print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
         
         preds = preds.repeat(1, 3, 1, 1)
-        labels = labels.repeat(1, 3, 1, 1)
+        # labels = labels.repeat(1, 3, 1, 1)
         # print(preds.shape, labels.shape)
         
         # loss = self.MSE(preds, labels)
-        loss = model_cfg.alpha_l *self.L1(preds, labels) #+ \
-                # model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
-                # model_cfg.gamma_l * self.style_loss(preds, labels)
+        loss = model_cfg.alpha_l *self.L1(preds, labels) + \
+                model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
+                model_cfg.gamma_l * self.style_loss(preds, labels)
         psnr = self.psnr(preds, labels)
         ssim = self.ssim(preds, labels)
         self.log('train_loss', loss, prog_bar=True)
@@ -93,13 +111,13 @@ class Img_2_Img(pl.LightningModule):
         #     print(f"Preds range: {preds.min():.2f}-{preds.max():.2f} | Labels range: {labels.min():.2f}-{labels.max():.2f}")
         
         preds = preds.repeat(1, 3, 1, 1)
-        labels = labels.repeat(1, 3, 1, 1) 
+        # labels = labels.repeat(1, 3, 1, 1) 
         # print(preds.shape, labels.shape)
 
         # loss = self.MSE(preds, labels)
-        loss = model_cfg.alpha_l * self.L1(preds, labels)#+ \
-            #    model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
-            #    model_cfg.gamma_l * self.style_loss(preds, labels)
+        loss = model_cfg.alpha_l * self.L1(preds, labels)+ \
+               model_cfg.beta_l * self.perceptual_loss(preds, labels) + \
+               model_cfg.gamma_l * self.style_loss(preds, labels)
         psnr = self.psnr(preds, labels)
         ssim = self.ssim(preds, labels)
         self.log('val_loss', loss, prog_bar=True)
@@ -148,43 +166,43 @@ class Img_2_Img(pl.LightningModule):
             }
         }
     
-    def on_validation_end(self):
-        # print('Logging validation images...')
-        # self.log('lr', self.optimizers().param_groups[0]['lr'], prog_bar=True, )
-        epoch = self.current_epoch
+    # def on_validation_end(self):
+    #     # print('Logging validation images...')
+    #     # self.log('lr', self.optimizers().param_groups[0]['lr'], prog_bar=True, )
+    #     epoch = self.current_epoch
 
-        if (
-            self.example_val_batch is None
-            or epoch % self.log_image_every_n_epochs != 0
-        ):
-            return
+    #     if (
+    #         self.example_val_batch is None
+    #         or epoch % self.log_image_every_n_epochs != 0
+    #     ):
+    #         return
 
-        images, labels, preds = self.example_val_batch
+    #     images, labels, preds = self.example_val_batch
 
-        # Take first 8 samples
-        images = images[:8].cpu()
-        labels = labels[:8].cpu()
-        preds  = preds[:8].cpu()
+    #     # Take first 8 samples
+    #     images = images[:8].cpu()
+    #     labels = labels[:8].cpu()
+    #     preds  = preds[:8].cpu()
 
-        # Your visualization function
-        show_image_mask_grid(
-            images,
-            preds,  # or labels, depending what you want to show
-            nrow=4,
-            img_name=f"outputs/images/val_pred_epoch_{epoch}"
-        )
+    #     # Your visualization function
+    #     show_image_mask_grid(
+    #         images,
+    #         preds,  # or labels, depending what you want to show
+    #         nrow=4,
+    #         img_name=f"outputs/images/val_pred_epoch_{epoch}"
+    #     )
 
-        # Optional: W&B logging
-        if isinstance(self.logger, pl.loggers.WandbLogger):
-            self.logger.experiment.log({
-                "val_examples": wandb.Image(
-                    f"misc/val_pred_epoch_{epoch}.png",
-                    caption=f"Epoch {epoch}"
-                )
-            })
+    #     # Optional: W&B logging
+    #     if isinstance(self.logger, pl.loggers.WandbLogger):
+    #         self.logger.experiment.log({
+    #             "val_examples": wandb.Image(
+    #                 f"misc/val_pred_epoch_{epoch}.png",
+    #                 caption=f"Epoch {epoch}"
+    #             )
+    #         })
 
-        # Free memory
-        self.example_val_batch = None
+    #     # Free memory
+    #     self.example_val_batch = None
 
 if __name__ == '__main__':
     # print('Training UNET model...')
@@ -201,30 +219,32 @@ if __name__ == '__main__':
 
     train_cfg = TrainConfig()
 
-    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image_v3',
-                        f'{data_cfg.dataset_path}/train/mask_v2',
-                        img_size=data_cfg.img_size,)
-    val_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image_v3',
-                        f'{data_cfg.dataset_path}/train/mask_v2',
+    train_ds =  BasicDataset(f'{data_cfg.dataset_path}/train/image',
+                        data_cfg.mask_path,
                         img_size=data_cfg.img_size,
-                        split='val')
+                        split='train',
+                        class_names = data_cfg.class_names,
+                        n_subsets=data_cfg.n_subsets)
+    val_ds = BasicDataset(f'{data_cfg.dataset_path}/val/image',
+                        data_cfg.mask_path,
+                        img_size=data_cfg.img_size,
+                        split='val',
+                        class_names = data_cfg.class_names,
+                        n_subsets=data_cfg.n_subsets)
     # val_ds = train_ds
     # train_dset = Subset(train_ds, range(0, int(len(train_ds)*train_cfg.tr_split)))
     train_dset = train_ds
-    train_dl = DataLoader(train_dset, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers,
-                            pin_memory=True, persistent_workers=True, prefetch_factor=2)
     # val_ds = Subset(val_ds, range(int(len(train_ds)*train_cfg.tr_split), len(train_ds)))
-    val_dl = DataLoader(val_ds, batch_size=data_cfg.batch_size, shuffle=False, num_workers=data_cfg.num_workers, 
-                        pin_memory=True, persistent_workers=True, prefetch_factor=2)
 
     print(f'Train dataset size: {len(train_dset)}', 'Val dataset size:', len(val_ds))
     
     wandb_logger = WandbLogger(
         project = 'unet_i2i',
-        name = model_cfg.model_name+"_1i1cm_am3",
+        name = model_cfg.model_name+"_v3_ad600s_dtd5c_10s",
         save_dir = 'logs',
         log_model = True,
-        notes = f"Training with L1 loss, randomized masks, some training optimizations",
+        notes = f"Training with modified dataset - much larger due to maks image combinatorics",
+        # reload_dataloaders_every_n_epochs = 1,
         # accelerator = device,
         # devices =train_cfg.num_devices,
         # precision = train_cfg.precision
@@ -259,7 +279,7 @@ if __name__ == '__main__':
     #BASE UNET
     # model = UNet(in_channels=model_cfg.in_channels, out_channels=1)
     
-    model = Img_2_Img(model).to(device)
+    model = Img_2_Img(model, train_ds, val_ds).to(device)
     
     early_stop = EarlyStopping(
         monitor = train_cfg.monitor,
@@ -283,8 +303,9 @@ if __name__ == '__main__':
                             accumulate_grad_batches = train_cfg.accumulate_grad_batches,
                             logger = wandb_logger,
                             callbacks = [early_stop, ckpt],
-                            log_every_n_steps = 10
+                            log_every_n_steps = 10,
+                            # reload_dataloaders_every_n_epochs = 1,
                             )
-    trainer.fit(model, train_dl, val_dl)
+    trainer.fit(model)
     # trainer.test(model, test_loader)
     # preds = trainer.predict(model, test_loader)

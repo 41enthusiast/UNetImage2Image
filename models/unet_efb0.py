@@ -15,14 +15,15 @@ class DecoderBlock_UNetpcb(nn.Module):
             self.upconv = nn.Identity()
         self.layers = DoubleConv(in_channels * 2, out_channels, out_channels)
         
-    def forward(self, x, skip_connection):
+    def forward(self, x, skip_connection, zero_conv=None):
  
         target_height = x.size(2)
         target_width = x.size(3)
         skip_interp = F.interpolate(
             skip_connection, size=(target_height, target_width), mode='bilinear', align_corners=False)
+        zero_conved = zero_conv(skip_interp) if zero_conv is not None else skip_interp
         
-        concatenated = torch.cat([skip_interp,  x], dim=1)   
+        concatenated = torch.cat([zero_conved,  x], dim=1)   
 
         concatenated = self.upconv(concatenated)
             
@@ -79,6 +80,19 @@ class UNet_pcb(nn.Module):
         self.encoder3 = nn.Sequential(*list(self.effnet.features.children())[2])  #out 24,56*56
         self.encoder4 = nn.Sequential(*list(self.effnet.features.children())[3])  #out 40,28*28
         self.encoder5 = nn.Sequential(*list(self.effnet.features.children())[4])  #out 40,28*28
+
+        # Zero Convolutions for skip connections for softer integration of efficientnet features
+        self.zero_conv1 = nn.Conv2d(self.layer1_features, self.layer1_features, kernel_size=1)
+        self.zero_conv2 = nn.Conv2d(self.layer2_features, self.layer2_features, kernel_size=1)
+        self.zero_conv3 = nn.Conv2d(self.layer3_features, self.layer3_features, kernel_size=1)
+        self.zero_conv4 = nn.Conv2d(self.layer4_features, self.layer4_features, kernel_size=1)
+        self.zero_conv5 = nn.Conv2d(self.layer5_features, self.layer5_features, kernel_size=1)
+        nn.init.normal_(self.zero_conv1.weight, mean=0.0, std=1e-3), nn.init.zeros_(self.zero_conv1.bias)
+        nn.init.normal_(self.zero_conv2.weight, mean=0.0, std=1e-3), nn.init.zeros_(self.zero_conv2.bias)
+        nn.init.normal_(self.zero_conv3.weight, mean=0.0, std=1e-3), nn.init.zeros_(self.zero_conv3.bias)
+        nn.init.normal_(self.zero_conv4.weight, mean=0.0, std=1e-3), nn.init.zeros_(self.zero_conv4.bias)
+        nn.init.normal_(self.zero_conv5.weight, mean=0.0, std=1e-3), nn.init.zeros_(self.zero_conv5.bias)
+
         
         del self.effnet
         
@@ -110,11 +124,11 @@ class UNet_pcb(nn.Module):
         
         # Bottleneck Layer
         bn = self.bottleneck(output5)
-        up1 = self.decoder1(bn,  output5)
-        up2 = self.decoder2(up1, output4)
-        up3 = self.decoder3(up2, output3)
-        up4 = self.decoder4(up3, output2)
-        up5 = self.decoder5(up4, output1) 
+        up1 = self.decoder1(bn,  output5, zero_conv=self.zero_conv5)
+        up2 = self.decoder2(up1, output4, zero_conv=self.zero_conv4)
+        up3 = self.decoder3(up2, output3, zero_conv=self.zero_conv3)
+        up4 = self.decoder4(up3, output2, zero_conv=self.zero_conv2)
+        up5 = self.decoder5(up4, output1, zero_conv=self.zero_conv1) 
         
         # Final convolution to produce segmentation mask
         res = self.final_conv(up5)
