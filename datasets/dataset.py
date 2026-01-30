@@ -86,8 +86,12 @@ class BasicDataset(Dataset):
         self.n_subsets = n_subsets
 
         #to mod next to have a certain cutoff of train datasets
-        self.ids = [splitext(file)[0] for file in listdir(images_dir) if isfile(join(images_dir, file)) and not file.startswith('.')]
-        
+        # self.ids = [splitext(file)[0] for file in listdir(images_dir) if isfile(join(images_dir, file)) and not file.startswith('.')]
+        self.ids = [
+            splitext(str(p.relative_to(images_dir)))[0] 
+            for p in Path(images_dir).rglob('*') 
+            if p.is_file() and not p.name.startswith('.')
+        ]
         # self.mask_ids = [splitext(file)[0] for file in listdir(mask_dir) if isfile(join(mask_dir, file)) and not file.startswith('.')]
         # self.mask_ids = self.mask_ids*(len(self.ids)//len(self.mask_ids)+1)[:len(self.ids)] #repeat mask ids if less masks than images
         self.texture_masks = {}
@@ -298,13 +302,13 @@ if __name__ == '__main__':
     # )
     from config import DataConfig
     data_cfg = DataConfig()
-    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image',
+    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train',
                         data_cfg.mask_path,
                         img_size=data_cfg.img_size,
                         split='train',
                         class_names = data_cfg.class_names,
                         n_subsets=data_cfg.n_subsets)
-    val_ds = BasicDataset(f'{data_cfg.dataset_path}/train/image',
+    val_ds = BasicDataset(f'{data_cfg.dataset_path}/val',
                         data_cfg.mask_path,
                         img_size=data_cfg.img_size,
                         split='val',

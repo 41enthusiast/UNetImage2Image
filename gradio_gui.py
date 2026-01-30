@@ -27,12 +27,13 @@ with gr.Blocks() as demo:
     gr.Markdown("## 🧠 Image Restoration Demo (Lightning + UNet)")
 
     with gr.Row():
-        file_input = gr.File(label="Drop image file")
+        img_file_input = gr.File(label="Drop image file")
+        mask_file_input = gr.File(label="Drop mask file")
 
     with gr.Row():
+        gt_img = gr.Image(label="Image")
+        mask_img = gr.Image(label="Ground Truth Mask")
         masked_img = gr.Image(label="Masked Image")
-        gt_img = gr.Image(label="Ground Truth")
-        mask_img = gr.Image(label="Mask")
 
     diff_map = gr.Image(label="Difference Heatmap (Masked vs GT)")
 
@@ -40,7 +41,7 @@ with gr.Blocks() as demo:
 
     load_btn.click(
         load_images,
-        inputs=file_input,
+        inputs=[img_file_input, mask_file_input],
         outputs=[masked_img, gt_img, mask_img, diff_map]
     )
 
@@ -50,17 +51,17 @@ with gr.Blocks() as demo:
 
     with gr.Row():
         pred_img = gr.Image(label="Predicted Image")
-        pred_diff = gr.Image(label="Difference (Prediction vs GT)")
-        overlay = gr.Image(label="SIFT Match Overlay")
+        pred_diff = gr.Image(label="Difference between difference heat maps of (input and prediction) to (gt and prediction)")
+        # overlay = gr.Image(label="SIFT Match Overlay")
 
     time_text = gr.Textbox(label="Inference Time")
     device_used = gr.Textbox(label="Device Used", value=DEVICE)
-    metrics_text = gr.Textbox(label="Metrics (MSE, PSNR, SSIM)")
+    metrics_text = gr.Textbox(label="Metrics (MSE, L1, PSNR, SSIM)")
     
     fix_btn.click(
         fix_image,
-        inputs=file_input,
-        outputs=[pred_img, pred_diff, overlay, time_text, metrics_text]
+        inputs=[img_file_input, mask_file_input],
+        outputs=[pred_img, pred_diff, time_text, metrics_text]
     )
 
 demo.launch()

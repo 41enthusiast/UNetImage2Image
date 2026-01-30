@@ -3,7 +3,7 @@ from typing import Optional
 
 @dataclass
 class DataConfig:
-    dataset_name: str = "art_dataset_v2"
+    dataset_name: str = "art_painting_v3"
     dataset_path: str = "../art_painting_data"
     mask_path: str = "../dtd/images"
     n_subsets: int = 3

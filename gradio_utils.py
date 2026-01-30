@@ -45,7 +45,8 @@ MASK_DIR = DATASET_ROOT / "mask"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-CKPT_PATH = "logs/unet_i2i/puvmf076/checkpoints/unet_efb0_730k.ckpt"
+# CKPT_PATH = "logs/unet_i2i/hdlmu4ns/checkpoints/unet_efb0_730k.ckpt"
+CKPT_PATH = "ckpts/ap2800_dtd5c_50s/unet_efb0_730k.ckpt"
 
 MODEL = load_model()
 
@@ -109,65 +110,93 @@ def sift_match_visualize(img1_gray, img2_gray, ratio_thresh=0.75):
 
     return overlay_img, match_percentage
 
+def make_masked(img, mask):
+    return img * (1 - mask[:, :, None] / 255.0) + mask[:, :, None] / 255.0 * 255.0
+
 def to_tensor(img):
     img = img.astype(np.float32) / 255.0
     img = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
     return img
 
-def load_images(file):
-    print(file, IMAGE_DIR, MASKED_DIR, MASK_DIR)
+def load_images(img_file, mask_file):
+    print(img_file, mask_file, IMAGE_DIR, MASKED_DIR, MASK_DIR)
     
-    filename = Path(file.name).name
+    img_filename = img_file#Path(img_file.name).name
+    mask_filename = mask_file#Path(mask_file.name).name
 
-    gt_path = IMAGE_DIR / filename
-    masked_path = MASKED_DIR / filename
-    mask_path = MASK_DIR / filename
+    gt_path = Path(img_filename)
+    # masked_path = MASKED_DIR / img_filename
+    mask_path = Path(mask_filename)
+    
 
     if not gt_path.exists():
         raise gr.Error(f"File not found: {gt_path}")
+    if not mask_path.exists():
+        raise gr.Error(f"File not found: {mask_path}")
 
     gt = load_rgb(gt_path)
-    masked = load_rgb(masked_path)
+    # masked = load_rgb(masked_path)
     mask = load_mask(mask_path)
+    mask = cv2.resize(mask, (gt.shape[1], gt.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+    masked = make_masked(gt, mask)
 
     diff = diff_heatmap(masked, gt)
 
-    return masked, gt, mask, diff
+    return masked/255, gt/255, mask/255, diff/255
 
 
-def fix_image(file):
+def fix_image(img_file, mask_file):
     start = time.time()
 
-    filename = Path(file.name).name
-    masked_path = MASKED_DIR / filename
-    gt_path = IMAGE_DIR / filename
-    mask_path = MASK_DIR / filename
+    img_filename = img_file#Path(img_file.name).name
+    mask_filename = mask_file#Path(mask_file.name).name
 
-    masked = load_rgb(masked_path)
+    gt_path = Path(img_filename)
+    # masked_path = MASKED_DIR / img_filename
+    mask_path = Path(mask_filename)
+
+    # masked = load_rgb(masked_path)
     gt = load_rgb(gt_path)
     mask = load_mask(mask_path)[:, :, None]
+    mask = cv2.resize(mask, (gt.shape[1], gt.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+    masked = make_masked(gt, mask)
 
     x = to_tensor(masked).to(DEVICE)
 
     with torch.no_grad():
+        torch.cuda.empty_cache()
         pred = MODEL(x)
 
-    pred = pred.squeeze(0).permute(1, 2, 0).cpu().numpy()
-    
+    # print(pred.shape)
+    mask = np.repeat(np.expand_dims(mask, axis = 2),3, axis=2)
+    pred = pred.squeeze(0).repeat(3,1,1).permute(1, 2, 0).cpu().numpy()
+    if pred.shape != mask.shape:
+        pred = cv2.resize(pred, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+        print("Resized pred to match mask shape.")
+
     psnr = PeakSignalNoiseRatio(data_range=1.0)
     ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
     mse_val = np.mean((pred - (mask.astype(np.float32) / 255.0)) ** 2)
+    l1_val = np.mean(np.abs(pred - (mask.astype(np.float32) / 255.0)))
     psnr_val = psnr(torch.from_numpy(pred).permute(2,0,1).unsqueeze(0), torch.from_numpy(mask.astype(np.float32) / 255.0).permute(2,0,1).unsqueeze(0)).item()
     ssim_val = ssim(torch.from_numpy(pred).permute(2,0,1).unsqueeze(0), torch.from_numpy(mask.astype(np.float32) / 255.0).permute(2,0,1).unsqueeze(0)).item()
     pred = np.clip(pred * 255.0, 0, 255).astype(np.uint8)
     
     # print(pred.shape, mask.shape)
 
-    diff_pred = diff_heatmap(pred, mask)
+    diff_pred_mask = diff_heatmap(pred, mask)
+    diff_pred_img = diff_heatmap(pred, gt)
+    # diff_pred = cv2.absdiff(diff_pred_mask, diff_pred_img)
+    diff_pred = diff_heatmap(diff_pred_mask, diff_pred_img)
+    verdict = ""
+    if np.abs(diff_pred_mask).sum() < np.abs(diff_pred_img).sum():
+        verdict = "Good. Prediction is close to Mask/Target."
+    else:
+        verdict = "Bad. Model has learned to copy the input."
     # print(diff_pred.shape, pred.shape)
-    overlay, perc = sift_match_visualize(pred.squeeze(), mask)
+    # overlay, perc = sift_match_visualize(pred.squeeze(), mask)
 
     elapsed = time.time() - start
-    metrics_text = f"MSE: {mse_val:.4f}\nPSNR: {psnr_val:.2f}\nSSIM: {ssim_val:.4f} \nSIFT Match %: {perc:.2f}%"
+    metrics_text = f"{verdict}\nMSE: {mse_val:.4f}\nL1: {l1_val:.4f}\nPSNR: {psnr_val:.2f}\nSSIM: {ssim_val:.4f}"
 
-    return pred.squeeze(), diff_pred, overlay, f"{elapsed:.3f} seconds", metrics_text
+    return pred.squeeze(), diff_pred, f"{elapsed:.3f} seconds", metrics_text
