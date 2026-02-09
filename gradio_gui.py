@@ -22,6 +22,7 @@ mask_dir_state = gr.State(MASK_DIR)
 
 model_state = gr.State(lambda: MODEL)
 device_state = gr.State(DEVICE)
+gr.close_all()
 
 with gr.Blocks() as demo:
     gr.Markdown("## 🧠 Image Restoration Demo (Lightning + UNet)")

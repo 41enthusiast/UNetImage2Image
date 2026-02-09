@@ -13,7 +13,7 @@ from config import *
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from datasets.dataset import BasicDataset
+from dataset.dataset import BasicDataset
 from torch.utils.data import DataLoader
 from torch.utils.data import Subset
 from torchmetrics.image.psnr import PeakSignalNoiseRatio
@@ -21,6 +21,7 @@ from torchmetrics.image.ssim import StructuralSimilarityIndexMeasure
 # from lightning.pytorch import Trainer, seed_everything
 import random
 import os
+
 
 
 class Img_2_Img(pl.LightningModule):
@@ -40,7 +41,6 @@ class Img_2_Img(pl.LightningModule):
         self.lr = train_cfg.lr
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
-        
 
     def forward(self, x):
         return self.model(x)

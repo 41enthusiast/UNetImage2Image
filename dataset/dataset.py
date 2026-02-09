@@ -13,8 +13,17 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from albumentations.pytorch import ToTensorV2
 import albumentations as A
+from torchvision.transforms import InterpolationMode
 # from utils import show_image_mask_grid
 import random
+import os
+import PIL
+import re
+
+import json
+from torchvision.transforms import functional as F 
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 def load_image(filename, mode='RGB'):
     # ext = splitext(filename)[1]
@@ -293,46 +302,172 @@ class BasicDataset(Dataset):
             'mask':augmented['mask'].permute(2,0,1).float().contiguous()
         }
 
+
+MASK_DIR = '../art_painting_data/train/mask'
+IMG_DIR = '../art_painting_data/train/image'
+class ArtDatasetPipeline:
+    def __init__(self, metadata_path, root_dir, masked_dir):
+        self.root_dir = root_dir
+        self.masked_dir = masked_dir
+        with open(os.path.join(self.root_dir,metadata_path), 'r') as f:
+            self.metadata = json.load(f)
+
+    def get_folder_from_alpha_range(self, alpha_range):
+        """Converts [0.1, 0.5] -> 'alpha01-05'"""
+        return f"alpha{int(alpha_range[0]*10):02d}-{int(alpha_range[1]*10):02d}"
+
+    def generator(self):
+        for entry in self.metadata:
+            folder = self.get_folder_from_alpha_range(entry['alpha_range'])
+            if f'test/{folder}' != self.masked_dir:
+                continue
+            
+            # Primary path (all) vs Secondary path (subset)
+            primary_path = os.path.join(self.root_dir, self.masked_dir, entry['corrupted_image'])
+            
+            if os.path.exists(primary_path):
+                img_path = primary_path
+            else:
+                print('OMG not there', primary_path)
+                continue # Skip if file is missing in both locations
+
+            yield {
+                "__key__": entry['corrupted_image'],
+                "corrupted_pil": Image.open(img_path).convert("RGB"),
+                "meta": entry
+            }
+
+def apply_transforms(sample):
+    """
+    Refined reconstruction for the PL pipeline.
+    Matches the 'Actual Corrupted' image using metadata.
+    """
+    img_pil = sample["corrupted_pil"] # This is usually the target patch
+    meta = sample["meta"]
+    mask_img = meta["mask_image"]
+    orig_img = meta["original_image"]
+    mask = Image.open(os.path.join(MASK_DIR, mask_img)).convert("L")
+    orig = Image.open(os.path.join(IMG_DIR, orig_img)).convert("RGB")
+    
+    # 1. Dimensions
+    target_W, target_H = img_pil.size
+    full_W, full_H = meta['image_size'] # e.g., 512, 512
+    
+    # 2. Scaling Logic (Mirroring your manual script)
+    scale = meta["mask_scale"]
+    scaled_H = int(full_H * scale)
+    scaled_W = int(full_W * scale)
+    mask = F.resize(mask, (scaled_W, scaled_H), InterpolationMode.BILINEAR)
+    
+    # 3. Coordinate Calculation (Top-Left, NOT center)
+    # We multiply normalized coords [y, x] by the SCALED dimensions
+    top = int(meta["crop_position"][0] * scaled_H)
+    left = int(meta["crop_position"][1] * scaled_W)
+    # 4. Bounds Safety (Clamping to prevent black padding)
+    top = max(0, min(top, scaled_H - target_H))
+    left = max(0, min(left, scaled_W - target_W))
+    # 5. Crop and Convert
+    mask = F.crop(mask, top, left, target_H, target_W)
+    orig_t = F.to_tensor(orig)
+    mask_t = F.to_tensor(mask)
+    mask_t = mask_t * meta['strength']
+    mask_t = torch.clamp(mask_t, min = 0.1, max = 0.5)
+    input_tensor = F.to_tensor(img_pil)
+    # Simple alpha blending reconstruction solely determined by mask values
+    reconstructed_t = orig_t * (1 - mask_t) + mask_t
+    return {
+        "masked_image": input_tensor,
+        "recon_masked_image": reconstructed_t,
+        "mask_image": mask_t,
+        "original_image": orig_t,
+        "meta": meta
+    }
+
+def get_pipeline():
+    # Ensure you are passing all 5 required paths to your revamped class
+    return ArtDatasetPipeline(
+        metadata_path="metadata.json", 
+        root_dir="../art_painting_data/new_test",
+        masked_dir="test/alpha01-05",
+    ).generator()
+
+
 if __name__ == '__main__':
-    mode = 'train'
+    mode = 'test'
 
     # logging.basicConfig(
     #     level=logging.INFO,
     #     format="%(asctime)s | %(levelname)s | %(message)s"
     # )
-    from config import DataConfig
-    data_cfg = DataConfig()
-    train_ds = BasicDataset(f'{data_cfg.dataset_path}/train',
-                        data_cfg.mask_path,
-                        img_size=data_cfg.img_size,
-                        split='train',
-                        class_names = data_cfg.class_names,
-                        n_subsets=data_cfg.n_subsets)
-    val_ds = BasicDataset(f'{data_cfg.dataset_path}/val',
-                        data_cfg.mask_path,
-                        img_size=data_cfg.img_size,
-                        split='val',
-                        class_names = data_cfg.class_names,
-                        n_subsets=data_cfg.n_subsets)
-    print(f'Train dataset size: {len(train_ds)}', 'Val dataset size:', len(val_ds))
-    print(train_ds.total_units, val_ds.total_units)
-    train_dl = DataLoader(train_ds, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers,
-                        pin_memory=True, persistent_workers=True, prefetch_factor=2)
-    val_dl = DataLoader(val_ds, batch_size=data_cfg.batch_size, shuffle=False, num_workers=data_cfg.num_workers,
-                        pin_memory=True, persistent_workers=True, prefetch_factor=2)
-    val_counts = 0
-    for batch in val_dl:
-        val_counts += batch['image'].shape[0]
-    print('Val counts:', val_counts)
-    print(batch['image'].shape, batch['mask'].shape)
-    show_image_mask_grid(batch['image'], batch['mask'], nrow=4, img_name='../outputs/images/val_imgmask_grid')
-    
-    counts = 0
-    for batch in train_dl:
-        counts += batch['image'].shape[0]
-    print(counts, batch['image'].shape, batch['mask'].shape)
-    show_image_mask_grid(batch['image'], batch['mask'], nrow=4, img_name='../outputs/images/train_imgmask_grid')
-    
+    if mode == 'train':
+        from config import DataConfig
+        data_cfg = DataConfig()
+        train_ds = BasicDataset(f'{data_cfg.dataset_path}/train',
+                            data_cfg.mask_path,
+                            img_size=data_cfg.img_size,
+                            split='train',
+                            class_names = data_cfg.class_names,
+                            n_subsets=data_cfg.n_subsets)
+        val_ds = BasicDataset(f'{data_cfg.dataset_path}/val',
+                            data_cfg.mask_path,
+                            img_size=data_cfg.img_size,
+                            split='val',
+                            class_names = data_cfg.class_names,
+                            n_subsets=data_cfg.n_subsets)
+        print(f'Train dataset size: {len(train_ds)}', 'Val dataset size:', len(val_ds))
+        print(train_ds.total_units, val_ds.total_units)
+        train_dl = DataLoader(train_ds, batch_size=data_cfg.batch_size, shuffle=True, num_workers=data_cfg.num_workers,
+                            pin_memory=True, persistent_workers=True, prefetch_factor=2)
+        val_dl = DataLoader(val_ds, batch_size=data_cfg.batch_size, shuffle=False, num_workers=data_cfg.num_workers,
+                            pin_memory=True, persistent_workers=True, prefetch_factor=2)
+        val_counts = 0
+        for batch in val_dl:
+            val_counts += batch['image'].shape[0]
+        print('Val counts:', val_counts)
+        print(batch['image'].shape, batch['mask'].shape)
+        show_image_mask_grid(batch['image'], batch['mask'], nrow=4, img_name='../outputs/images/val_imgmask_grid')
+        
+        counts = 0
+        for batch in train_dl:
+            counts += batch['image'].shape[0]
+        print(counts, batch['image'].shape, batch['mask'].shape)
+        show_image_mask_grid(batch['image'], batch['mask'], nrow=4, img_name='../outputs/images/train_imgmask_grid')
+    else:
+        MASK_DIR = '../'+MASK_DIR
+        IMG_DIR = '../'+IMG_DIR
+        import webdataset as wds
+        test_dataset = wds.DataPipeline(
+                get_pipeline,
+                wds.map(apply_transforms),
+                wds.batched(1)
+            )
+        sample = next(iter(test_dataset))
+        corr_t = sample['masked_image'].squeeze()
+        reconstructed_t = sample['recon_masked_image'].squeeze()
+        mask_t = sample['mask_image'].squeeze()
+        diff = torch.abs(corr_t - reconstructed_t).mean(dim=0).numpy()
+
+        # Visualization
+        plt.figure(figsize=(15, 5))
+        
+        plt.subplot(1, 4, 1)
+        plt.title("Actual Corrupted (from Disk)")
+        plt.imshow(corr_t.permute(1, 2, 0).numpy())
+        
+        plt.subplot(1, 4, 2)
+        plt.title("Reconstructed (via Metadata)")
+        plt.imshow(reconstructed_t.permute(1, 2, 0))
+
+        plt.subplot(1, 4, 3)
+        plt.title("Reconstructed mask (via Metadata)")
+        plt.imshow(mask_t, cmap = 'gray')
+        
+        plt.subplot(1, 4, 4)
+        plt.title("Difference Heatmap")
+        sns.heatmap(diff, cmap='inferno')
+        plt.show()
+
+        print(f"Mean Absolute Error: {diff.mean():.6f}")
     # dataset = TextureDataModule(tar_path = "../dtd-r1.0.1.tar.gz", batch_size=4).prepare_data()
     
 

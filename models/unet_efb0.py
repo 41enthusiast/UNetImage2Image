@@ -81,7 +81,7 @@ class UNet_pcb(nn.Module):
         self.encoder4 = nn.Sequential(*list(self.effnet.features.children())[3])  #out 40,28*28
         self.encoder5 = nn.Sequential(*list(self.effnet.features.children())[4])  #out 40,28*28
 
-        # Zero Convolutions for skip connections for softer integration of efficientnet features
+        # Zero Convolutions for skip connections for softer integration of efficientnet features, needs a non significant bleed of signals
         self.zero_conv1 = nn.Conv2d(self.layer1_features, self.layer1_features, kernel_size=1)
         self.zero_conv2 = nn.Conv2d(self.layer2_features, self.layer2_features, kernel_size=1)
         self.zero_conv3 = nn.Conv2d(self.layer3_features, self.layer3_features, kernel_size=1)

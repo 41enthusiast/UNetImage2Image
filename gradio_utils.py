@@ -125,20 +125,21 @@ def load_images(img_file, mask_file):
     mask_filename = mask_file#Path(mask_file.name).name
 
     gt_path = Path(img_filename)
-    # masked_path = MASKED_DIR / img_filename
-    mask_path = Path(mask_filename)
-    
-
     if not gt_path.exists():
         raise gr.Error(f"File not found: {gt_path}")
-    if not mask_path.exists():
-        raise gr.Error(f"File not found: {mask_path}")
-
     gt = load_rgb(gt_path)
-    # masked = load_rgb(masked_path)
-    mask = load_mask(mask_path)
-    mask = cv2.resize(mask, (gt.shape[1], gt.shape[0]), interpolation=cv2.INTER_LANCZOS4)
-    masked = make_masked(gt, mask)
+    # masked_path = MASKED_DIR / img_filename
+    if mask_filename is not None:
+        mask_path = Path(mask_filename)
+        if not mask_path.exists():
+            raise gr.Error(f"File not found: {mask_path}")
+        mask = load_mask(mask_path)
+        mask = cv2.resize(mask, (gt.shape[1], gt.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+        # masked = load_rgb(masked_path)
+        masked = make_masked(gt, mask)
+    else:
+        masked = gt
+        mask = np.zeros_like(gt)
 
     diff = diff_heatmap(masked, gt)
 
@@ -149,18 +150,18 @@ def fix_image(img_file, mask_file):
     start = time.time()
 
     img_filename = img_file#Path(img_file.name).name
-    mask_filename = mask_file#Path(mask_file.name).name
-
     gt_path = Path(img_filename)
-    # masked_path = MASKED_DIR / img_filename
-    mask_path = Path(mask_filename)
-
-    # masked = load_rgb(masked_path)
     gt = load_rgb(gt_path)
-    mask = load_mask(mask_path)[:, :, None]
-    mask = cv2.resize(mask, (gt.shape[1], gt.shape[0]), interpolation=cv2.INTER_LANCZOS4)
-    masked = make_masked(gt, mask)
-
+    mask_filename = mask_file#Path(mask_file.name).name
+    if mask_filename is not None:
+        mask_path = Path(mask_filename)
+        mask = load_mask(mask_path)[:, :, None]
+        mask = cv2.resize(mask, (gt.shape[1], gt.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+        masked = make_masked(gt, mask)
+    else:
+        masked = gt
+        mask = np.zeros((gt.shape[0], gt.shape[1]))
+    
     x = to_tensor(masked).to(DEVICE)
 
     with torch.no_grad():

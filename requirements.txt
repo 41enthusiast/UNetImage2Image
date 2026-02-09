@@ -12,3 +12,5 @@ matplotlib
 ptwt
 seaborn
 scikit-learn
+datasets
+webdataset
